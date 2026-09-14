@@ -1,0 +1,54 @@
+import os
+import datetime
+from typing import List, Dict, Any
+import psycopg2
+from psycopg2.extras import DictCursor
+
+def get_db_connection():
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
+    return psycopg2.connect(db_url)
+
+def init_db():
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+        conn.commit()
+
+def add_task(title: str, description: str = "") -> int:
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO tasks (title, description) VALUES (%s, %s) RETURNING id", 
+                (title, description)
+            )
+            task_id = cursor.fetchone()[0]
+        conn.commit()
+        return task_id
+
+def get_tasks() -> List[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=DictCursor) as cursor:
+            cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+def update_task_status(task_id: int, status: str):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE tasks SET status = %s WHERE id = %s", (status, task_id))
+        conn.commit()
+
+def delete_task(task_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
+        conn.commit()
