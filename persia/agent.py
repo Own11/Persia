@@ -178,7 +178,11 @@ def run_agent(task_description: str, ui_callback: Callable[[str], None] = None):
         response = chat.send_message(task_description)
     except Exception as e:
         if ui_callback:
-            ui_callback(f"Error from Gemini API: {e}")
+            import traceback
+            # Strip non-ASCII from traceback so it's safe to send to Telegram
+            tb = traceback.format_exc()
+            tb_safe = tb.encode('ascii', errors='replace').decode('ascii')
+            ui_callback(f"Error from Gemini API: {e}\n\nTraceback (last 3 lines):\n" + '\n'.join(tb_safe.strip().splitlines()[-5:]))
         return
 
     for _ in range(15):  # Max steps
