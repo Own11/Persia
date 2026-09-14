@@ -93,9 +93,9 @@ def fetch_url(url: str) -> str:
 # ─── Task tools ────────────────────────────────────────────────────────────────
 
 def create_task(title: str, description: str = "", deadline: Optional[str] = None) -> str:
-    """Create a new task in the user's task manager list. Optionally set a deadline (e.g. '2026-09-20', 'пятница', 'через 3 дня'). Use this when the user asks to remember a task, or to break down your own work into subtasks."""
+    """Create a new task in the user's task manager list. Optionally set a deadline (e.g. '2026-09-20', 'friday', 'in 3 days'). Use this when the user asks to remember a task, or to break down your own work into subtasks."""
     task_id = add_task(title, description, deadline)
-    deadline_str = f" | Дедлайн: {deadline}" if deadline else ""
+    deadline_str = f" | Deadline: {deadline}" if deadline else ""
     return f"Created task ID {task_id}: {title}{deadline_str}"
 
 def mark_task_done(task_id: int) -> str:
@@ -116,7 +116,7 @@ def list_tasks() -> str:
         return "No tasks found."
     lines = []
     for t in tasks:
-        deadline_str = f" | Дедлайн: {t['deadline']}" if t.get('deadline') else ""
+        deadline_str = f" | Deadline: {t['deadline']}" if t.get('deadline') else ""
         lines.append(f"ID: {t['id']} | Title: {t['title']} | Status: {t['status']}{deadline_str}")
     return "\n".join(lines)
 
@@ -149,7 +149,7 @@ def run_agent(task_description: str, ui_callback: Callable[[str], None] = None):
     sys_instr = (
         "You are Persia, a helpful AI terminal agent and task manager. "
         "You have access to tools to interact with the system, manage tasks, and browse the internet. "
-        "When the user asks you to add a task, use create_task to save it — you can also extract a deadline if mentioned. "
+        "When the user asks you to add a task, use create_task to save it - you can also extract a deadline if mentioned. "
         "When given a complex objective, you can use execute_shell to run commands and create_task to track your sub-steps. "
         "When the user asks about current events, news, weather, prices, or anything requiring real-time info, use search_web first, then fetch_url if you need full page content. "
         "Always respond in the same language as the user. "
