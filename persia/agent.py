@@ -1,11 +1,11 @@
-# Force UTF-8 before google-genai initializes its HTTP transport
-import os
-os.environ.setdefault("PYTHONUTF8", "1")
-os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-os.environ.setdefault("LANG", "en_US.UTF-8")
+# ── UTF-8 fix: Vercel serverless uses POSIX/C locale (ASCII) by default.
+# Monkeypatching locale.getpreferredencoding forces libraries that call
+# str.encode() or open() without explicit encoding to use UTF-8.
+import locale as _locale
+_locale.getpreferredencoding = lambda do_setlocale=True: 'UTF-8'
 
-import subprocess
 import os
+import subprocess
 from typing import Callable, Optional
 from google.genai import types
 
@@ -57,6 +57,7 @@ def write_file(filepath: str, content: str) -> str:
 def search_web(query: str, max_results: int = 5) -> str:
     """Search the internet for up-to-date information using DuckDuckGo. Returns a list of results with titles, URLs and snippets. Use this when the user asks about current events, facts, prices, weather, or anything that requires real-time data."""
     try:
+        # pyrefly: ignore [missing-import]
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
@@ -73,6 +74,7 @@ def fetch_url(url: str) -> str:
     """Fetch and return the text content of a webpage URL. Use this to read the full content of a page found via search_web."""
     try:
         import httpx
+        # pyrefly: ignore [missing-import]
         from bs4 import BeautifulSoup
         headers = {"User-Agent": "Mozilla/5.0 (compatible; PersiaBot/1.0)"}
         with httpx.Client(timeout=15, follow_redirects=True) as client:
