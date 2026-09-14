@@ -1,6 +1,6 @@
 import os
 import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import psycopg2
 from psycopg2.extras import DictCursor
 
@@ -19,17 +19,30 @@ def init_db():
                 title TEXT NOT NULL,
                 description TEXT,
                 status TEXT DEFAULT 'pending',
+                deadline TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """)
+            # Migrate: add deadline column if it doesn't exist yet
+            cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='tasks' AND column_name='deadline'
+                ) THEN
+                    ALTER TABLE tasks ADD COLUMN deadline TEXT;
+                END IF;
+            END $$;
+            """)
         conn.commit()
 
-def add_task(title: str, description: str = "") -> int:
+def add_task(title: str, description: str = "", deadline: Optional[str] = None) -> int:
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO tasks (title, description) VALUES (%s, %s) RETURNING id", 
-                (title, description)
+                "INSERT INTO tasks (title, description, deadline) VALUES (%s, %s, %s) RETURNING id",
+                (title, description, deadline)
             )
             task_id = cursor.fetchone()[0]
         conn.commit()

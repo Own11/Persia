@@ -19,18 +19,20 @@ def send_message(chat_id: int, text: str) -> None:
     """Send a text message to a Telegram chat."""
     if not text:
         return
-    # Telegram has a 4096 char limit per message
     for chunk in [text[i:i + 4000] for i in range(0, len(text), 4000)]:
-        with httpx.Client() as client:
-            client.post(
-                f"{TELEGRAM_API}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": chunk,
-                    "parse_mode": "Markdown",
-                },
-                timeout=10,
-            )
+        try:
+            with httpx.Client() as client:
+                client.post(
+                    f"{TELEGRAM_API}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": chunk,
+                        "parse_mode": "Markdown",
+                    },
+                    timeout=10,
+                )
+        except Exception as e:
+            print(f"send_message error: {e}")
 
 
 @app.on_event("startup")
@@ -54,7 +56,6 @@ async def webhook(request: Request):
     except Exception:
         return Response(status_code=400)
 
-    # Handle only regular text messages
     message = update.get("message") or update.get("edited_message")
     if not message:
         return Response(status_code=200)
@@ -65,43 +66,71 @@ async def webhook(request: Request):
     if not text:
         return Response(status_code=200)
 
-    # --- Built-in commands ---
+    # ─── /start ────────────────────────────────────────────────────────────────
     if text == "/start":
         send_message(
             chat_id,
             "👋 *Привет! Я Persia AI Agent.*\n\n"
-            "Я могу управлять задачами и общаться с AI.\n\n"
-            "*Команды:*\n"
+            "Я могу управлять задачами, искать в интернете и общаться с AI.\n\n"
+            "*📋 Команды задач:*\n"
             "`/addtask <название>` — добавить задачу\n"
+            "`/addtask <название> | <дедлайн>` — с дедлайном\n"
             "`/list` — список задач\n"
             "`/deltask <id>` — удалить задачу\n"
-            "`/donetask <id>` — отметить выполненной\n"
-            "`/help` — показать помощь\n\n"
-            "Или просто напишите мне что-нибудь — я отвечу как AI.",
+            "`/donetask <id>` — отметить выполненной\n\n"
+            "*🌐 AI + Интернет:*\n"
+            "Просто напишите что угодно — агент ответит, а если нужно, найдёт в интернете.\n\n"
+            "Попробуй: _Что сегодня в новостях?_ или _Добавь задачу купить молоко до пятницы_",
         )
         return Response(status_code=200)
 
+    # ─── /help ─────────────────────────────────────────────────────────────────
     if text == "/help":
         send_message(
             chat_id,
-            "*Доступные команды:*\n"
+            "*Доступные команды:*\n\n"
+            "📋 *Задачи:*\n"
             "`/addtask <название>` — добавить задачу\n"
-            "`/list` — список всех задач\n"
+            "`/addtask <название> | <дедлайн>` — с дедлайном (например: `купить молоко | пятница`)\n"
+            "`/list` — список всех задач с дедлайнами\n"
             "`/deltask <id>` — удалить задачу по ID\n"
             "`/donetask <id>` — отметить задачу выполненной\n\n"
-            "Любой другой текст будет передан AI-агенту.",
+            "🤖 *AI Агент:*\n"
+            "Любой другой текст передаётся AI-агенту.\n"
+            "Агент умеет искать в интернете, читать страницы и управлять задачами.\n\n"
+            "*Примеры:*\n"
+            "• _Найди погоду в Алматы_\n"
+            "• _Что такое квантовые компьютеры?_\n"
+            "• _Добавь задачу сдать отчёт до 20 сентября_",
         )
         return Response(status_code=200)
 
+    # ─── /addtask ──────────────────────────────────────────────────────────────
     if text.startswith("/addtask"):
-        task_name = text[8:].strip().strip('"\'')
-        if task_name:
-            task_id = add_task(title=task_name)
-            send_message(chat_id, f"✅ Задача добавлена (ID: {task_id}): *{task_name}*")
+        raw = text[8:].strip()
+        if raw:
+            # Support "название | дедлайн" format
+            if "|" in raw:
+                parts = raw.split("|", 1)
+                task_name = parts[0].strip()
+                deadline = parts[1].strip()
+            else:
+                task_name = raw
+                deadline = None
+
+            task_id = add_task(title=task_name, deadline=deadline)
+            deadline_str = f"\n📅 Дедлайн: *{deadline}*" if deadline else ""
+            send_message(chat_id, f"✅ Задача добавлена (ID: {task_id}): *{task_name}*{deadline_str}")
         else:
-            send_message(chat_id, "⚠️ Укажи название: `/addtask моя задача`")
+            send_message(
+                chat_id,
+                "⚠️ Укажи название:\n"
+                "`/addtask моя задача`\n"
+                "`/addtask купить молоко | пятница`"
+            )
         return Response(status_code=200)
 
+    # ─── /list ─────────────────────────────────────────────────────────────────
     if text == "/list":
         tasks = get_tasks()
         if not tasks:
@@ -110,10 +139,12 @@ async def webhook(request: Request):
             lines = ["📋 *Список задач:*\n"]
             for t in tasks:
                 icon = "✅" if t["status"] == "done" else "🔲"
-                lines.append(f"{icon} `ID:{t['id']}` {t['title']}")
+                deadline_str = f"\n      📅 до: _{t['deadline']}_" if t.get("deadline") else ""
+                lines.append(f"{icon} `ID:{t['id']}` {t['title']}{deadline_str}")
             send_message(chat_id, "\n".join(lines))
         return Response(status_code=200)
 
+    # ─── /deltask ──────────────────────────────────────────────────────────────
     if text.startswith("/deltask"):
         parts = text.split()
         if len(parts) == 2 and parts[1].isdigit():
@@ -123,6 +154,7 @@ async def webhook(request: Request):
             send_message(chat_id, "⚠️ Использование: `/deltask <id>`")
         return Response(status_code=200)
 
+    # ─── /donetask ─────────────────────────────────────────────────────────────
     if text.startswith("/donetask"):
         parts = text.split()
         if len(parts) == 2 and parts[1].isdigit():
@@ -132,7 +164,7 @@ async def webhook(request: Request):
             send_message(chat_id, "⚠️ Использование: `/donetask <id>`")
         return Response(status_code=200)
 
-    # --- AI Agent fallback ---
+    # ─── AI Agent fallback ─────────────────────────────────────────────────────
     send_message(chat_id, "🤔 *Думаю...*")
 
     collected: list[str] = []
@@ -146,12 +178,13 @@ async def webhook(request: Request):
         send_message(chat_id, f"❌ Ошибка агента: {e}")
         return Response(status_code=200)
 
-    # Filter out internal/tool messages, keep only final Agent text
-    final_lines = [m for m in collected if m.startswith("Agent:")]
-    if final_lines:
-        final_text = "\n".join(final_lines).replace("Agent: Agent: ", "Agent: ")
-    else:
-        final_text = "\n".join(collected)
+    # Send only the final Agent text responses (filter tool noise)
+    final_lines = [
+        m.replace("Agent: Agent: ", "Agent: ")
+        for m in collected
+        if m.startswith("Agent:")
+    ]
+    final_text = "\n".join(final_lines) if final_lines else "\n".join(collected)
 
     if final_text:
         send_message(chat_id, final_text)
