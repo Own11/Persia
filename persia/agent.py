@@ -1,3 +1,9 @@
+# Force UTF-8 before google-genai initializes its HTTP transport
+import os
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("LANG", "en_US.UTF-8")
+
 import subprocess
 import os
 from typing import Callable, Optional
