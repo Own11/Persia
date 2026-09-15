@@ -1,21 +1,23 @@
-# ── UTF-8 fix: Vercel serverless uses POSIX/C locale (ASCII) by default.
-# Monkeypatching locale.getpreferredencoding forces libraries that call
-# str.encode() or open() without explicit encoding to use UTF-8.
-import locale as _locale
-_locale.getpreferredencoding = lambda do_setlocale=True: 'UTF-8'
+"""
+Persia agent - uses the Gemini REST API directly via httpx so that
+we have full control over UTF-8 encoding, bypassing the google-genai
+SDK which causes 'ascii' codec errors in Vercel's serverless environment.
+"""
 
 import os
+import json
+import httpx
 import subprocess
 from typing import Callable, Optional
-from google.genai import types
 
-from persia.llm import get_client, MODEL
+from persia.llm import MODEL
 from persia.db import add_task, update_task_status, delete_task
+
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # ─── System tools ──────────────────────────────────────────────────────────────
 
 def execute_shell(command: str) -> str:
-    """Execute a shell command and return the output. Use this for running terminal commands."""
     try:
         result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
         output = result.stdout
@@ -28,7 +30,6 @@ def execute_shell(command: str) -> str:
         return f"Error executing command: {e}"
 
 def list_files(directory_path: str) -> str:
-    """List files and directories in the specified path."""
     try:
         files = os.listdir(directory_path)
         return "\n".join(files) if files else "Directory is empty."
@@ -36,17 +37,15 @@ def list_files(directory_path: str) -> str:
         return f"Error listing directory: {e}"
 
 def read_file(filepath: str) -> str:
-    """Read contents of a file."""
     try:
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
         return f"Error reading file: {e}"
 
 def write_file(filepath: str, content: str) -> str:
-    """Write contents to a file."""
     try:
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
         return f"File {filepath} written successfully."
     except Exception as e:
@@ -55,7 +54,6 @@ def write_file(filepath: str, content: str) -> str:
 # ─── Web tools ─────────────────────────────────────────────────────────────────
 
 def search_web(query: str, max_results: int = 5) -> str:
-    """Search the internet for up-to-date information using DuckDuckGo. Returns a list of results with titles, URLs and snippets. Use this when the user asks about current events, facts, prices, weather, or anything that requires real-time data."""
     try:
         # pyrefly: ignore [missing-import]
         from duckduckgo_search import DDGS
@@ -71,9 +69,7 @@ def search_web(query: str, max_results: int = 5) -> str:
         return f"Error searching web: {e}"
 
 def fetch_url(url: str) -> str:
-    """Fetch and return the text content of a webpage URL. Use this to read the full content of a page found via search_web."""
     try:
-        import httpx
         # pyrefly: ignore [missing-import]
         from bs4 import BeautifulSoup
         headers = {"User-Agent": "Mozilla/5.0 (compatible; PersiaBot/1.0)"}
@@ -81,11 +77,9 @@ def fetch_url(url: str) -> str:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        # Remove scripts and styles
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        # Limit to 3000 chars
         return text[:3000] + ("..." if len(text) > 3000 else "")
     except Exception as e:
         return f"Error fetching URL: {e}"
@@ -93,23 +87,19 @@ def fetch_url(url: str) -> str:
 # ─── Task tools ────────────────────────────────────────────────────────────────
 
 def create_task(title: str, description: str = "", deadline: Optional[str] = None) -> str:
-    """Create a new task in the user's task manager list. Optionally set a deadline (e.g. '2026-09-20', 'friday', 'in 3 days'). Use this when the user asks to remember a task, or to break down your own work into subtasks."""
     task_id = add_task(title, description, deadline)
     deadline_str = f" | Deadline: {deadline}" if deadline else ""
     return f"Created task ID {task_id}: {title}{deadline_str}"
 
 def mark_task_done(task_id: int) -> str:
-    """Mark a task as done using its ID."""
     update_task_status(task_id, 'done')
     return f"Task {task_id} marked as done."
 
 def delete_task_by_id(task_id: int) -> str:
-    """Delete a task from the list using its ID."""
     delete_task(task_id)
     return f"Task {task_id} deleted."
 
 def list_tasks() -> str:
-    """Get a list of all current tasks, their IDs and deadlines. Use this to find the ID of a task before marking it done or deleting it."""
     from persia.db import get_tasks
     tasks = get_tasks()
     if not tasks:
@@ -120,7 +110,7 @@ def list_tasks() -> str:
         lines.append(f"ID: {t['id']} | Title: {t['title']} | Status: {t['status']}{deadline_str}")
     return "\n".join(lines)
 
-# ─── Registry ──────────────────────────────────────────────────────────────────
+# ─── Tool registry ─────────────────────────────────────────────────────────────
 
 AVAILABLE_TOOLS = {
     'execute_shell': execute_shell,
@@ -135,104 +125,247 @@ AVAILABLE_TOOLS = {
     'list_tasks': list_tasks,
 }
 
+# JSON schemas for tools (pure ASCII - no Cyrillic anywhere)
+TOOL_DECLARATIONS = [
+    {
+        "name": "execute_shell",
+        "description": "Execute a shell command and return the output.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to execute"}
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "list_files",
+        "description": "List files and directories in a specified path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "directory_path": {"type": "string", "description": "Directory path to list"}
+            },
+            "required": ["directory_path"]
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filepath": {"type": "string", "description": "Path to the file"}
+            },
+            "required": ["filepath"]
+        }
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to a file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filepath": {"type": "string", "description": "Path to the file"},
+                "content": {"type": "string", "description": "Content to write"}
+            },
+            "required": ["filepath", "content"]
+        }
+    },
+    {
+        "name": "search_web",
+        "description": (
+            "Search the internet for up-to-date information using DuckDuckGo. "
+            "Use this when the user asks about current events, news, weather, prices, "
+            "or anything that requires real-time data."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"},
+                "max_results": {"type": "integer", "description": "Max number of results (default 5)"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "fetch_url",
+        "description": "Fetch and return the text content of a webpage URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL to fetch"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "create_task",
+        "description": (
+            "Create a new task in the task manager. "
+            "Optionally set a deadline (e.g. 'friday', '2026-09-20', 'in 3 days'). "
+            "Use this when the user asks to remember or track a task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Task title"},
+                "description": {"type": "string", "description": "Optional description"},
+                "deadline": {"type": "string", "description": "Optional deadline"}
+            },
+            "required": ["title"]
+        }
+    },
+    {
+        "name": "mark_task_done",
+        "description": "Mark a task as done using its ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "Task ID to mark done"}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "delete_task_by_id",
+        "description": "Delete a task from the list using its ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "Task ID to delete"}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "list_tasks",
+        "description": "Get all current tasks with their IDs, statuses, and deadlines.",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+]
+
+# ─── Gemini REST caller ────────────────────────────────────────────────────────
+
+SYS_INSTR = (
+    "You are Persia, a helpful AI agent and task manager. "
+    "You have tools to manage tasks, browse the internet, and interact with the system. "
+    "When the user asks to add a task, use create_task - extract any deadline mentioned. "
+    "When asked about current events, news, weather or prices, use search_web. "
+    "Always respond in the same language as the user. "
+    "Keep responses concise."
+)
+
+
+def _call_gemini(api_key: str, contents: list) -> dict:
+    """Make a single generateContent call to the Gemini REST API."""
+    url = f"{GEMINI_API_BASE}/{MODEL}:generateContent"
+    body = {
+        "system_instruction": {"parts": [{"text": SYS_INSTR}]},
+        "contents": contents,
+        "tools": [{"function_declarations": TOOL_DECLARATIONS}],
+        "generationConfig": {"temperature": 0.2}
+    }
+    # Explicitly encode as UTF-8 bytes to avoid any codec issues
+    body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+    with httpx.Client(timeout=30) as client:
+        resp = client.post(
+            url,
+            params={"key": api_key},
+            content=body_bytes,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ─── Agent runner ──────────────────────────────────────────────────────────────
 
 def run_agent(task_description: str, ui_callback: Callable[[str], None] = None):
-    """Run the agent loop for a given task using Gemini API."""
-    try:
-        client = get_client()
-    except Exception as e:
+    """Run the agent loop using the Gemini REST API directly."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
         if ui_callback:
-            ui_callback(f"Error initializing Gemini client: {e}")
+            ui_callback("Error: GEMINI_API_KEY is not set.")
         return
-
-    sys_instr = (
-        "You are Persia, a helpful AI terminal agent and task manager. "
-        "You have access to tools to interact with the system, manage tasks, and browse the internet. "
-        "When the user asks you to add a task, use create_task to save it - you can also extract a deadline if mentioned. "
-        "When given a complex objective, you can use execute_shell to run commands and create_task to track your sub-steps. "
-        "When the user asks about current events, news, weather, prices, or anything requiring real-time info, use search_web first, then fetch_url if you need full page content. "
-        "Always respond in the same language as the user. "
-        "Keep your text responses concise and informative."
-    )
-
-    tools_list = [
-        execute_shell, list_files, read_file, write_file,
-        search_web, fetch_url,
-        create_task, mark_task_done, delete_task_by_id, list_tasks
-    ]
-
-    chat = client.chats.create(
-        model=MODEL,
-        config=types.GenerateContentConfig(
-            system_instruction=sys_instr,
-            tools=tools_list,
-            temperature=0.2
-        )
-    )
 
     if ui_callback:
         ui_callback("Agent started. Thinking...")
 
-    try:
-        response = chat.send_message(task_description)
-    except Exception as e:
-        if ui_callback:
-            import traceback
-            # Strip non-ASCII from traceback so it's safe to send to Telegram
-            tb = traceback.format_exc()
-            tb_safe = tb.encode('ascii', errors='replace').decode('ascii')
-            ui_callback(f"Error from Gemini API: {e}\n\nTraceback (last 3 lines):\n" + '\n'.join(tb_safe.strip().splitlines()[-5:]))
-        return
+    # Build conversation history
+    contents = [
+        {"role": "user", "parts": [{"text": task_description}]}
+    ]
 
-    for _ in range(15):  # Max steps
-        if response.text and ui_callback:
-            ui_callback(f"Agent: {response.text}")
+    for _ in range(15):  # Max iterations
+        try:
+            data = _call_gemini(api_key, contents)
+        except Exception as e:
+            if ui_callback:
+                ui_callback(f"Error calling Gemini API: {e}")
+            return
 
-        if not response.function_calls:
-            break
+        # Extract the response
+        candidates = data.get("candidates", [])
+        if not candidates:
+            if ui_callback:
+                ui_callback("No response from Gemini.")
+            return
 
-        tool_responses = []
-        for tool_call in response.function_calls:
-            func_name = tool_call.name
-            args = tool_call.args or {}
+        candidate = candidates[0]
+        content = candidate.get("content", {})
+        parts = content.get("parts", [])
+
+        # Collect text and function calls from response
+        text_parts = []
+        function_calls = []
+        for part in parts:
+            if "text" in part:
+                text_parts.append(part["text"])
+            if "functionCall" in part:
+                function_calls.append(part["functionCall"])
+
+        if text_parts and ui_callback:
+            ui_callback(f"Agent: {' '.join(text_parts)}")
+
+        if not function_calls:
+            break  # Done
+
+        # Add model response to history
+        contents.append({"role": "model", "parts": parts})
+
+        # Execute tool calls
+        tool_response_parts = []
+        for fc in function_calls:
+            func_name = fc.get("name", "")
+            args = fc.get("args", {})
 
             if ui_callback:
-                ui_callback(f"Running tool: {func_name} with args {args}")
+                ui_callback(f"Running tool: {func_name}")
 
             if func_name in AVAILABLE_TOOLS:
-                tool_func = AVAILABLE_TOOLS[func_name]
                 try:
-                    if hasattr(args, "model_dump"):
-                        args_dict = args.model_dump()
-                    elif isinstance(args, dict):
-                        args_dict = args
-                    else:
-                        args_dict = dict(args)
-
-                    result = tool_func(**args_dict)
+                    result = AVAILABLE_TOOLS[func_name](**args)
                 except Exception as e:
-                    result = f"Error calling tool: {e}"
+                    result = f"Error: {e}"
             else:
-                result = f"Unknown tool {func_name}"
+                result = f"Unknown tool: {func_name}"
 
             if ui_callback:
-                ui_callback(f"Tool Result: {result}")
+                ui_callback(f"Tool result: {str(result)[:200]}")
 
-            tool_responses.append(
-                types.Part.from_function_response(
-                    name=func_name,
-                    response={"result": str(result)}
-                )
-            )
+            tool_response_parts.append({
+                "functionResponse": {
+                    "name": func_name,
+                    "response": {"result": str(result)}
+                }
+            })
 
-        if tool_responses:
-            try:
-                response = chat.send_message(tool_responses)
-            except Exception as e:
-                if ui_callback:
-                    ui_callback(f"Error sending tool result: {e}")
-                break
+        contents.append({"role": "user", "parts": tool_response_parts})
 
     if ui_callback:
         ui_callback("Agent execution completed.")
