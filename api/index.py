@@ -62,11 +62,24 @@ def health():
     return {"status": "Persia Bot is running 🐱"}
 
 
+
 @app.post("/api/webhook")
 async def webhook(request: Request):
+    try:
+        return await _webhook_impl(request)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Still return 200 so Telegram stops retrying
+        return Response(status_code=200)
+
+async def _webhook_impl(request: Request):
+
     """Handle incoming Telegram updates."""
     try:
         update = await request.json()
+        if not isinstance(update, dict):
+            return Response(status_code=400)
     except Exception:
         return Response(status_code=400)
 
@@ -75,10 +88,14 @@ async def webhook(request: Request):
         return Response(status_code=200)
 
     chat_id: int = message["chat"]["id"]
-    text: str = message.get("text", "").strip()
+    text: str = message.get("text", "")
+    if text is None:
+        text = ""
+    text = text.strip()
 
     if not text:
         return Response(status_code=200)
+
 
     # ─── /start ────────────────────────────────────────────────────────────────
     if text == "/start":
