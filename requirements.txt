@@ -9,3 +9,7 @@ duckduckgo-search>=6.0.0
 beautifulsoup4>=4.12.0
 youtube-transcript-api>=0.6.0
 yandex-music>=2.1.0
+pillow>=10.0.0
+pytesseract>=0.3.10
+python-magic>=0.4.27
+pdfminer.six>=20221105

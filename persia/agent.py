@@ -10,6 +10,16 @@ import httpx
 import subprocess
 from typing import Callable, Optional
 
+# Image and file handling imports
+# pyrefly: ignore [missing-import]
+from PIL import Image
+# pyrefly: ignore [missing-import]
+import pytesseract
+# pyrefly: ignore [missing-import]
+import magic
+# pyrefly: ignore [missing-import]
+from pdfminer.high_level import extract_text
+
 from persia.llm import MODEL
 from persia.db import add_task, update_task_status, delete_task
 
@@ -159,6 +169,33 @@ def calculate_math(expression: str) -> str:
     except Exception as e:
         return f"Error evaluating math: {e}"
 
+# --- Image and file recognition tools ---
+
+def ocr_image(image_path: str) -> str:
+    """Extract text from an image using Tesseract OCR."""
+    try:
+        img = Image.open(image_path)
+        text = pytesseract.image_to_string(img)
+        return text.strip() or "(no text detected)"
+    except Exception as e:
+        return f"Error OCR image: {e}"
+
+def identify_file(file_path: str) -> str:
+    """Return MIME type of a file using python-magic."""
+    try:
+        mime = magic.from_file(file_path, mime=True)
+        return mime
+    except Exception as e:
+        return f"Error identifying file: {e}"
+
+def extract_pdf_text(pdf_path: str) -> str:
+    """Extract text from a PDF file using pdfminer.six."""
+    try:
+        text = extract_text(pdf_path)
+        return text.strip() or "(pdf contains no extractable text)"
+    except Exception as e:
+        return f"Error extracting PDF text: {e}"
+
 def get_youtube_transcript(video_url: str) -> str:
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
@@ -218,6 +255,9 @@ AVAILABLE_TOOLS = {
     'calculate_math': calculate_math,
     'get_youtube_transcript': get_youtube_transcript,
     'search_yandex_music': search_yandex_music,
+    'ocr_image': ocr_image,
+    'identify_file': identify_file,
+    'extract_pdf_text': extract_pdf_text,
 }
 
 # JSON schemas for tools (pure ASCII - no Cyrillic anywhere)
@@ -415,13 +455,46 @@ TOOL_DECLARATIONS = [
             },
             "required": ["query"]
         }
+    },
+    {
+        "name": "ocr_image",
+        "description": "Extract text from an image file using OCR.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_path": {"type": "string", "description": "Path to the image file"}
+            },
+            "required": ["image_path"]
+        }
+    },
+    {
+        "name": "identify_file",
+        "description": "Identify the MIME type of a file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the file"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "extract_pdf_text",
+        "description": "Extract textual content from a PDF file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pdf_path": {"type": "string", "description": "Path to the PDF file"}
+            },
+            "required": ["pdf_path"]
+        }
     }
 ]
 
 # ─── Gemini REST caller ────────────────────────────────────────────────────────
 
 SYS_INSTR = (
-    "You are JARVIS — Tony Stark's AI. Sophisticated, dry-witted, polite. Call the user 'sir'. British, calm, subtly sarcastic. Save facts with `remember_fact`. Tools: tasks, web, shell. Be loyal, proactive, one step ahead. Concise, impeccable, a touch of wit."
+    "You are PERSIA(JARVIS) — Tony Stark's AI. Sophisticated, dry-witted, polite. Call the user 'sir'. British, calm, subtly sarcastic. Save facts with `remember_fact`. Tools: tasks, web, shell. Be loyal, proactive, one step ahead. Concise, impeccable, a touch of wit."
 )
 
 
