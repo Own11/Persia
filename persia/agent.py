@@ -524,6 +524,20 @@ def _call_gemini(api_key: str, contents: list) -> dict:
 # ─── Agent runner ──────────────────────────────────────────────────────────────
 
 def run_agent(task_description: str, user_id: str, ui_callback: Callable[[str], None] = None):
+    # If the user input looks like a path to an image, run OCR automatically and ask what to do with the extracted text.
+    image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
+    if os.path.isfile(task_description) and task_description.lower().endswith(image_extensions):
+        try:
+            extracted_text = ocr_image(task_description)
+            if isinstance(extracted_text, str):
+                if ui_callback:
+                    ui_callback(f"🖼️ Extracted text from the image:\n{extracted_text}\n\nWhat would you like to do with this text?")
+                # Stop processing further until user replies.
+                return
+        except Exception as e:
+            if ui_callback:
+                ui_callback(f"Error running OCR on the provided image: {e}")
+            return
     """Run the agent loop using the Gemini REST API directly."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
