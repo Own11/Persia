@@ -92,10 +92,29 @@ async def _webhook_impl(request: Request):
     user_id = str(from_user.get("id", chat_id))
     username = from_user.get("username", from_user.get("first_name", "User"))
     
-    text: str = message.get("text", "")
+    text: str = message.get("text", "") or message.get("caption", "")
     if text is None:
         text = ""
     text = text.strip()
+
+    photo = message.get("photo")
+    if photo:
+        import tempfile
+        # Get highest resolution
+        file_id = photo[-1]["file_id"]
+        try:
+            with httpx.Client() as client:
+                resp = client.get(f"{TELEGRAM_API}/getFile?file_id={file_id}")
+                if resp.status_code == 200:
+                    file_path_tg = resp.json()["result"]["file_path"]
+                    download_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_tg}"
+                    img_data = client.get(download_url).content
+                    tmp_path = os.path.join(tempfile.gettempdir(), f"{file_id}.jpg")
+                    with open(tmp_path, "wb") as f:
+                        f.write(img_data)
+                    text = tmp_path
+        except Exception as e:
+            print(f"Error downloading photo: {e}")
 
     if not text:
         return Response(status_code=200)
