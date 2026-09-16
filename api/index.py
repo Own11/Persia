@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from persia.db import init_db, add_task, get_tasks, update_task_status, delete_task
+from persia.db import init_db, add_task, get_tasks, update_task_status, delete_task, get_memories, delete_memory, clear_chat_history, get_stats
 from persia.gateway import process_message, MessageContext
 
 app = FastAPI(title="Persia Bot")
@@ -130,13 +130,18 @@ async def _webhook_impl(request: Request):
             "`/list` — список всех задач с дедлайнами\n"
             "`/deltask <id>` — удалить задачу по ID\n"
             "`/donetask <id>` — отметить задачу выполненной\n\n"
+            "🧠 *Память и контекст:*\n"
+            "`/memories` — посмотреть факты, которые агент знает о вас\n"
+            "`/forget <id>` — удалить воспоминание\n"
+            "`/clear_history` — очистить историю текущего чата\n"
+            "`/stats` — статистика базы данных\n\n"
             "🤖 *AI Агент:*\n"
             "Любой другой текст передаётся AI-агенту.\n"
-            "Агент умеет искать в интернете, читать страницы и управлять задачами.\n\n"
+            "Агент умеет искать в интернете, читать страницы, искать музыку, смотреть видео и управлять задачами.\n\n"
             "*Примеры:*\n"
-            "• _Найди погоду в Алматы_\n"
+            "• _Найди песню Linkin Park Numb в Яндекс Музыке_\n"
             "• _Что такое квантовые компьютеры?_\n"
-            "• _Добавь задачу сдать отчёт до 20 сентября_",
+            "• _Сделай саммари этого ютуб видео: [ссылка]_",
         )
         return Response(status_code=200)
 
@@ -198,6 +203,47 @@ async def _webhook_impl(request: Request):
         else:
             send_message(chat_id, "⚠️ Использование: `/donetask <id>`")
         return Response(status_code=200)
+
+    # ─── /memories ─────────────────────────────────────────────────────────────
+    if text == "/memories":
+        memories = get_memories(user_id)
+        if not memories:
+            send_message(chat_id, "🧠 Я пока ничего о вас не помню.")
+        else:
+            lines = ["🧠 *Мои воспоминания о вас:*\n"]
+            for m in memories:
+                lines.append(f"`ID:{m['id']}` — {m['fact']}")
+            send_message(chat_id, "\n".join(lines))
+        return Response(status_code=200)
+
+    # ─── /forget ───────────────────────────────────────────────────────────────
+    if text.startswith("/forget"):
+        parts = text.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            delete_memory(int(parts[1]))
+            send_message(chat_id, f"🗑 Воспоминание `{parts[1]}` удалено.")
+        else:
+            send_message(chat_id, "⚠️ Использование: `/forget <id>`")
+        return Response(status_code=200)
+
+    # ─── /clear_history ────────────────────────────────────────────────────────
+    if text == "/clear_history":
+        clear_chat_history(str(chat_id))
+        send_message(chat_id, "🧹 История этого чата очищена. Начинаем с чистого листа!")
+        return Response(status_code=200)
+
+    # ─── /stats ────────────────────────────────────────────────────────────────
+    if text == "/stats":
+        stats = get_stats()
+        send_message(
+            chat_id,
+            f"📊 *Статистика бота:*\n\n"
+            f"Задач: {stats['tasks']}\n"
+            f"Воспоминаний: {stats['memories']}\n"
+            f"Сообщений в истории: {stats['messages']}"
+        )
+        return Response(status_code=200)
+
 
     # ─── AI Agent fallback ─────────────────────────────────────────────────────
     send_message(chat_id, "🤔 *Думаю...*")

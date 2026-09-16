@@ -119,6 +119,84 @@ def remember_fact(user_id: str, fact: str) -> str:
     except Exception as e:
         return f"Error remembering fact: {e}"
 
+# --- New Tools ---
+import datetime
+
+def get_current_time() -> str:
+    now = datetime.datetime.now()
+    return f"Current date and time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+
+def get_crypto_price(coin: str) -> str:
+    try:
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin.lower()}&vs_currencies=usd"
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+            if coin.lower() in data:
+                return f"The current price of {coin} is ${data[coin.lower()]['usd']}"
+            return f"Could not find price for {coin}."
+    except Exception as e:
+        return f"Error fetching crypto price: {e}"
+
+def get_weather(location: str) -> str:
+    try:
+        url = f"https://wttr.in/{location}?format=3"
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return f"Weather in {location}: {resp.text.strip()}"
+    except Exception as e:
+        return f"Error fetching weather: {e}"
+
+def calculate_math(expression: str) -> str:
+    try:
+        allowed_chars = "0123456789+-*/(). "
+        if not all(c in allowed_chars for c in expression):
+            return "Error: Only basic math characters are allowed."
+        result = eval(expression, {"__builtins__": None}, {})
+        return str(result)
+    except Exception as e:
+        return f"Error evaluating math: {e}"
+
+def get_youtube_transcript(video_url: str) -> str:
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        import urllib.parse
+        
+        parsed = urllib.parse.urlparse(video_url)
+        video_id = ""
+        if parsed.hostname == 'youtu.be':
+            video_id = parsed.path[1:]
+        elif parsed.hostname in ('www.youtube.com', 'youtube.com'):
+            if parsed.path == '/watch':
+                qs = urllib.parse.parse_qs(parsed.query)
+                video_id = qs.get('v', [''])[0]
+        
+        if not video_id:
+            return "Could not extract YouTube video ID from URL."
+            
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['ru', 'en'])
+        text = " ".join([t['text'] for t in transcript])
+        return text[:4000] + ("..." if len(text) > 4000 else "")
+    except Exception as e:
+        return f"Error getting transcript: {e}"
+
+def search_yandex_music(query: str) -> str:
+    try:
+        from yandex_music import Client
+        client = Client().init()
+        search_result = client.search(query)
+        if search_result.tracks and search_result.tracks.results:
+            track = search_result.tracks.results[0]
+            artists = ", ".join([a.name for a in track.artists])
+            url = f"https://music.yandex.ru/album/{track.albums[0].id}/track/{track.id}" if track.albums else ""
+            return f"Found track: {artists} - {track.title}. Link: {url}"
+        return "No tracks found on Yandex Music."
+    except Exception as e:
+        return f"Error searching Yandex Music: {e}"
+
+
 
 # ─── Tool registry ─────────────────────────────────────────────────────────────
 
@@ -134,6 +212,12 @@ AVAILABLE_TOOLS = {
     'delete_task_by_id': delete_task_by_id,
     'list_tasks': list_tasks,
     'remember_fact': remember_fact,
+    'get_current_time': get_current_time,
+    'get_crypto_price': get_crypto_price,
+    'get_weather': get_weather,
+    'calculate_math': calculate_math,
+    'get_youtube_transcript': get_youtube_transcript,
+    'search_yandex_music': search_yandex_music,
 }
 
 # JSON schemas for tools (pure ASCII - no Cyrillic anywhere)
@@ -267,6 +351,69 @@ TOOL_DECLARATIONS = [
                 "fact": {"type": "string", "description": "The fact to remember (e.g. 'likes coffee', 'birthday is tomorrow')"}
             },
             "required": ["user_id", "fact"]
+        }
+    },
+    {
+        "name": "get_current_time",
+        "description": "Get the current system date and time.",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    },
+    {
+        "name": "get_crypto_price",
+        "description": "Get the current USD price of a cryptocurrency (e.g., 'bitcoin', 'ethereum').",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "coin": {"type": "string", "description": "The coin ID on CoinGecko (e.g. bitcoin, ethereum)"}
+            },
+            "required": ["coin"]
+        }
+    },
+    {
+        "name": "get_weather",
+        "description": "Get the current weather for a specific location or city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "The name of the city or location"}
+            },
+            "required": ["location"]
+        }
+    },
+    {
+        "name": "calculate_math",
+        "description": "Calculate a math expression accurately.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string", "description": "The mathematical expression (e.g. '123 * 45', '100 / 3')"}
+            },
+            "required": ["expression"]
+        }
+    },
+    {
+        "name": "get_youtube_transcript",
+        "description": "Get the transcript/subtitles of a YouTube video given its URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "video_url": {"type": "string", "description": "The YouTube video URL"}
+            },
+            "required": ["video_url"]
+        }
+    },
+    {
+        "name": "search_yandex_music",
+        "description": "Search for a track or artist on Yandex Music and return a link to the track.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The track name or artist to search for"}
+            },
+            "required": ["query"]
         }
     }
 ]

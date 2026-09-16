@@ -11,7 +11,7 @@ from textual.worker import Worker
 from textual import work
 # pyrefly: ignore [missing-import]
 
-from persia.db import init_db, get_tasks, add_task, delete_task, update_task_status
+from persia.db import init_db, get_tasks, add_task, delete_task, update_task_status, get_memories, delete_memory, clear_chat_history, get_stats
 from persia.gateway import process_message, MessageContext
 from persia.llm import MODEL
 
@@ -165,6 +165,32 @@ class PersiaApp(App):
             chat_log.clear()
             self.log_to_chat("[cda529]System:[/] Log cleared.")
             
+        elif lower_text == "/memories":
+            memories = get_memories("terminal_user")
+            if not memories:
+                self.log_to_chat("[cda529]System:[/] 🧠 I don't remember anything about you yet.")
+            else:
+                self.log_to_chat("\n[bold cda529]🧠 My memories of you:[/]")
+                for m in memories:
+                    self.log_to_chat(f" ID:{m['id']} - {m['fact']}")
+                self.log_to_chat("[bold cda529]--------------------[/]\n")
+                
+        elif lower_text.startswith("/forget"):
+            try:
+                mem_id = int(text.split()[1])
+                delete_memory(mem_id)
+                self.log_to_chat(f"[cda529]System:[/] 🗑 Memory {mem_id} deleted.")
+            except (IndexError, ValueError):
+                self.log_to_chat(f"[cda529]System:[/] Usage: /forget <id>")
+                
+        elif lower_text == "/clear_history":
+            clear_chat_history("terminal_chat")
+            self.log_to_chat("[cda529]System:[/] 🧹 Chat history cleared.")
+            
+        elif lower_text == "/stats":
+            stats = get_stats()
+            self.log_to_chat(f"\n[bold cda529]📊 Bot Stats:[/]\nTasks: {stats['tasks']}\nMemories: {stats['memories']}\nMessages: {stats['messages']}\n")
+            
         elif lower_text == "/help":
             self.log_to_chat(
                 "\n[cda529]Available Commands:[/]\n"
@@ -172,7 +198,11 @@ class PersiaApp(App):
                 "  [white]/list[/]           - View all your tasks\n"
                 "  [white]/deltask <id>[/]   - Delete a task by ID\n"
                 "  [white]/donetask <id>[/]  - Mark a task as done by ID\n"
-                "  [white]/clear[/]          - Clear this log\n"
+                "  [white]/memories[/]       - View your memories\n"
+                "  [white]/forget <id>[/]    - Delete a memory\n"
+                "  [white]/clear_history[/]  - Clear chat history\n"
+                "  [white]/stats[/]          - View bot stats\n"
+                "  [white]/clear[/]          - Clear this UI log\n"
                 "  [white]/help[/]           - Show this help\n"
                 "  [grey50]<any other text>[/] - Talk to the AI Agent\n"
             )

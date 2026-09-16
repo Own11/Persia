@@ -125,3 +125,29 @@ def get_conversation_history(chat_id: str, limit: int = 20) -> List[Dict[str, An
             # Return in chronological order
             return [dict(row) for row in reversed(rows)]
 
+def delete_memory(mem_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM memories WHERE id = %s", (mem_id,))
+        conn.commit()
+
+def clear_chat_history(chat_id: str):
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM conversations WHERE chat_id = %s", (str(chat_id),))
+        conn.commit()
+
+def get_stats() -> Dict[str, int]:
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM tasks")
+            tasks_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM memories")
+            memories_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM conversations")
+            messages_count = cursor.fetchone()[0]
+            return {
+                "tasks": tasks_count,
+                "memories": memories_count,
+                "messages": messages_count
+            }
