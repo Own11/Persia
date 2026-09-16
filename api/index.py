@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from persia.db import init_db, add_task, get_tasks, update_task_status, delete_task
-from persia.agent import run_agent
+from persia.gateway import process_message, MessageContext
 
 app = FastAPI(title="Persia Bot")
 
@@ -88,6 +88,10 @@ async def _webhook_impl(request: Request):
         return Response(status_code=200)
 
     chat_id: int = message["chat"]["id"]
+    from_user = message.get("from", {})
+    user_id = str(from_user.get("id", chat_id))
+    username = from_user.get("username", from_user.get("first_name", "User"))
+    
     text: str = message.get("text", "")
     if text is None:
         text = ""
@@ -204,18 +208,31 @@ async def _webhook_impl(request: Request):
         collected.append(msg)
 
     try:
-        run_agent(text, tg_callback)
+        ctx = MessageContext(
+            chat_id=str(chat_id),
+            user_id=user_id,
+            text=text,
+            platform="telegram",
+            username=username
+        )
+        process_message(ctx, tg_callback)
     except Exception as e:
         send_message(chat_id, f"❌ Ошибка агента: {e}")
         return Response(status_code=200)
 
     # Send only the final Agent text responses (filter tool noise)
-    final_lines = [
-        m.replace("Agent: Agent: ", "Agent: ")
-        for m in collected
-        if m.startswith("Agent:")
-    ]
-    final_text = "\n".join(final_lines) if final_lines else "\n".join(collected)
+    # process_message might not always prefix with "Agent:" if it's already stripped, 
+    # but the run_agent still prefixes it. Let's just collect everything that isn't tool noise.
+    clean_lines = []
+    for m in collected:
+        if any(m.startswith(x) for x in ["Running tool:", "Tool result:", "Agent started.", "Agent execution"]):
+            continue
+        if m.startswith("Agent:"):
+            clean_lines.append(m[6:].strip())
+        else:
+            clean_lines.append(m)
+            
+    final_text = "\n".join(clean_lines) if clean_lines else ""
 
     if final_text:
         send_message(chat_id, final_text)

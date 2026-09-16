@@ -12,7 +12,7 @@ from textual import work
 # pyrefly: ignore [missing-import]
 
 from persia.db import init_db, get_tasks, add_task, delete_task, update_task_status
-from persia.agent import run_agent
+from persia.gateway import process_message, MessageContext
 from persia.llm import MODEL
 
 PERSIA_LOGO = r"""[cda529]
@@ -186,7 +186,15 @@ class PersiaApp(App):
         def ui_callback(msg: str):
             self.call_from_thread(self.log_to_chat, f"[cda529]Agent:[/] {msg}")
                 
-        run_agent(task_description, ui_callback)
+        # Terminal gets a hardcoded chat_id and user_id for simplicity (e.g. 'terminal_user')
+        ctx = MessageContext(
+            chat_id="terminal_chat",
+            user_id="terminal_user",
+            text=task_description,
+            platform="terminal",
+            username="TerminalUser"
+        )
+        process_message(ctx, ui_callback)
 
 if __name__ == "__main__":
     app = PersiaApp()

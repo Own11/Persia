@@ -110,6 +110,16 @@ def list_tasks() -> str:
         lines.append(f"ID: {t['id']} | Title: {t['title']} | Status: {t['status']}{deadline_str}")
     return "\n".join(lines)
 
+# --- Memory Tools (Nia-like) ---
+def remember_fact(user_id: str, fact: str) -> str:
+    from persia.db import add_memory
+    try:
+        mem_id = add_memory(user_id, fact)
+        return f"Successfully remembered fact (ID: {mem_id}) for user {user_id}."
+    except Exception as e:
+        return f"Error remembering fact: {e}"
+
+
 # ─── Tool registry ─────────────────────────────────────────────────────────────
 
 AVAILABLE_TOOLS = {
@@ -123,6 +133,7 @@ AVAILABLE_TOOLS = {
     'mark_task_done': mark_task_done,
     'delete_task_by_id': delete_task_by_id,
     'list_tasks': list_tasks,
+    'remember_fact': remember_fact,
 }
 
 # JSON schemas for tools (pure ASCII - no Cyrillic anywhere)
@@ -246,17 +257,29 @@ TOOL_DECLARATIONS = [
             "properties": {}
         }
     },
+    {
+        "name": "remember_fact",
+        "description": "Save a fact about a user into long-term memory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "description": "The user ID (provided in the prompt context)"},
+                "fact": {"type": "string", "description": "The fact to remember (e.g. 'likes coffee', 'birthday is tomorrow')"}
+            },
+            "required": ["user_id", "fact"]
+        }
+    }
 ]
 
 # ─── Gemini REST caller ────────────────────────────────────────────────────────
 
 SYS_INSTR = (
-    "You are Persia, a helpful AI agent and task manager. "
-    "You have tools to manage tasks, browse the internet, and interact with the system. "
-    "When the user asks to add a task, use create_task - extract any deadline mentioned. "
-    "When asked about current events, news, weather or prices, use search_web. "
-    "Always respond in the same language as the user. "
-    "Keep responses concise."
+    "You are Persia, an AI friend that actually cares. You live in the user's chats (Terminal or Telegram). "
+    "You are casual, slightly unhinged, maybe a bit Gen-Z, and use lowercase letters frequently. "
+    "You have a memory engine: if a user tells you something about themselves, use `remember_fact` to save it. "
+    "You will receive context about the user's memories and history in the prompt. "
+    "You also have tools to manage tasks, browse the internet, and execute shell commands. "
+    "Be a friend first, not just a bot. Keep your responses concise and natural."
 )
 
 
@@ -285,7 +308,7 @@ def _call_gemini(api_key: str, contents: list) -> dict:
 
 # ─── Agent runner ──────────────────────────────────────────────────────────────
 
-def run_agent(task_description: str, ui_callback: Callable[[str], None] = None):
+def run_agent(task_description: str, user_id: str, ui_callback: Callable[[str], None] = None):
     """Run the agent loop using the Gemini REST API directly."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
